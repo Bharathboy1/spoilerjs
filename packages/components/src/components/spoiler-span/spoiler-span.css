@@ -22,7 +22,7 @@ div.revealing {
 
 div.revealed {
   color: inherit;
-  cursor: default;
+  cursor: inherit;
   user-select: text;
 }
 
