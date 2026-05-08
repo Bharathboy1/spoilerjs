@@ -8,7 +8,7 @@ import { ParticleManager } from './particle-manager';
     shadow: true,
 })
 export class SpoilerSpan {
-    @Element() el: HTMLElement;
+    @Element() el!: HTMLElement;
 
     /**
      * Scale factor for particle size
@@ -73,11 +73,11 @@ export class SpoilerSpan {
     private particleManagers: ParticleManager[] = [];
     private animationFrameId: number | null = null;
     private textColor: string = '#000000';
-    private slotElement: HTMLSlotElement;
-    private containerDiv: HTMLDivElement;
-    private resizeObserver: ResizeObserver;
-    private scrollHandler: () => void;
-    private resizeHandler: () => void;
+    private slotElement!: HTMLSlotElement;
+    private containerDiv!: HTMLDivElement;
+    private resizeObserver!: ResizeObserver;
+    private scrollHandler!: () => void;
+    private resizeHandler!: () => void;
     private updateDebounceTimer: number | null = null;
     private setupDebounceTimer: number | null = null;
     // Cache DPR at setup time
@@ -163,7 +163,7 @@ export class SpoilerSpan {
             cancelAnimationFrame(this.animationFrameId);
             this.animationFrameId = null;
         }
-        // Remove canvases from body
+        // Remove canvases from their parent container
         this.canvases.forEach(canvas => {
             if (canvas.parentNode) {
                 canvas.parentNode.removeChild(canvas);
@@ -330,7 +330,7 @@ export class SpoilerSpan {
             textColor: this.textColor,
         };
 
-        // Create canvases for each bounding box, positioned absolutely on the page
+        // Create canvases for each bounding box, positioned relative to the spoiler host
         boundingBoxes.forEach((box) => {
             const canvas = document.createElement('canvas');
             // Use device pixel ratio for sharp rendering
@@ -339,12 +339,12 @@ export class SpoilerSpan {
             canvas.style.width = `${box.width}px`;
             canvas.style.height = `${box.height}px`;
             canvas.style.position = 'absolute';
-            canvas.style.left = `${box.x}px`;
-            canvas.style.top = `${box.y}px`;
+            canvas.style.left = `${box.x - containerRect.left}px`;
+            canvas.style.top = `${box.y - containerRect.top}px`;
             canvas.style.pointerEvents = 'none';
             canvas.style.zIndex = '1';
 
-            document.body.appendChild(canvas);
+            this.containerDiv.appendChild(canvas);
 
             const ctx = canvas.getContext('2d', { alpha: true });
             if (!ctx) {
@@ -374,10 +374,9 @@ export class SpoilerSpan {
 
         const range = document.createRange();
         let canvasIndex = 0;
-        const scrollX = window.scrollX ?? window.pageXOffset;
-        const scrollY = window.scrollY ?? window.pageYOffset;
+        const containerRect = this.containerDiv.getBoundingClientRect();
 
-        slotNodes.forEach(node => {
+        const updateNode = (node: Node) => {
             if (node.nodeType === Node.TEXT_NODE) {
                 range.selectNodeContents(node);
                 const rects = range.getClientRects();
@@ -386,26 +385,35 @@ export class SpoilerSpan {
                     const rect = rects[i];
                     if (rect.width > 0 && rect.height > 0 && canvasIndex < this.canvases.length) {
                         const canvas = this.canvases[canvasIndex];
-                        canvas.style.left = `${rect.left + scrollX}px`;
-                        canvas.style.top = `${rect.top + scrollY}px`;
+                        canvas.style.left = `${rect.left - containerRect.left}px`;
+                        canvas.style.top = `${rect.top - containerRect.top}px`;
                         canvasIndex++;
                     }
                 }
-            } else if (node.nodeType === Node.ELEMENT_NODE) {
-                const element = node as HTMLElement;
-                const rects = element.getClientRects();
+                return;
+            }
 
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                const element = node as HTMLElement;
+                if (element.childNodes.length > 0) {
+                    element.childNodes.forEach(child => updateNode(child));
+                    return;
+                }
+
+                const rects = element.getClientRects();
                 for (let i = 0; i < rects.length && canvasIndex < this.canvases.length; i++) {
                     const rect = rects[i];
                     if (rect.width > 0 && rect.height > 0) {
                         const canvas = this.canvases[canvasIndex];
-                        canvas.style.left = `${rect.left + scrollX}px`;
-                        canvas.style.top = `${rect.top + scrollY}px`;
+                        canvas.style.left = `${rect.left - containerRect.left}px`;
+                        canvas.style.top = `${rect.top - containerRect.top}px`;
                         canvasIndex++;
                     }
                 }
             }
-        });
+        };
+
+        slotNodes.forEach(node => updateNode(node));
     }
 
     private getTextBoundingBoxes(): BoundingBox[] {
@@ -416,43 +424,50 @@ export class SpoilerSpan {
 
         // Create a temporary span to measure text
         const range = document.createRange();
-        const scrollX = window.scrollX ?? window.pageXOffset;
-        const scrollY = window.scrollY ?? window.pageYOffset;
+        const containerRect = this.containerDiv.getBoundingClientRect();
 
-        slotNodes.forEach(node => {
+        const collectBoundingBoxes = (node: Node) => {
             if (node.nodeType === Node.TEXT_NODE) {
                 range.selectNodeContents(node);
                 const rects = range.getClientRects();
 
-                // Convert viewport rects to document coordinates so canvases can be absolutely positioned on the page
                 for (let i = 0; i < rects.length; i++) {
                     const rect = rects[i];
                     if (rect.width > 0 && rect.height > 0) {
                         boxes.push({
-                            x: rect.left + scrollX,
-                            y: rect.top + scrollY,
+                            x: rect.left - containerRect.left,
+                            y: rect.top - containerRect.top,
                             width: rect.width,
                             height: rect.height,
                         });
                     }
                 }
-            } else if (node.nodeType === Node.ELEMENT_NODE) {
-                const element = node as HTMLElement;
-                const rects = element.getClientRects();
+                return;
+            }
 
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                const element = node as HTMLElement;
+                if (element.childNodes.length > 0) {
+                    element.childNodes.forEach(child => collectBoundingBoxes(child));
+                    return;
+                }
+
+                const rects = element.getClientRects();
                 for (let i = 0; i < rects.length; i++) {
                     const rect = rects[i];
                     if (rect.width > 0 && rect.height > 0) {
                         boxes.push({
-                            x: rect.left + scrollX,
-                            y: rect.top + scrollY,
+                            x: rect.left - containerRect.left,
+                            y: rect.top - containerRect.top,
                             width: rect.width,
                             height: rect.height,
                         });
                     }
                 }
             }
-        });
+        };
+
+        slotNodes.forEach(node => collectBoundingBoxes(node));
 
         return boxes;
     }
@@ -527,7 +542,7 @@ export class SpoilerSpan {
 
         return (
             <div
-                ref={el => this.containerDiv = el}
+                ref={el => this.containerDiv = el as HTMLDivElement}
                 class={className}
                 style={style}
                 onClick={this.handleClick}
